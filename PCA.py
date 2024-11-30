@@ -1,78 +1,67 @@
-# Standard scientific Python imports
-import matplotlib.pyplot as plt
+import os
 import numpy as np
+import cv2  # For image processing
+import librosa  # For audio processing
+import librosa.display
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
-# Import datasets, classifiers and performance metrics
-from sklearn.datasets import fetch_olivetti_faces
+# Directories for local datasets
+image_data_dir = r"C:\Users\happy\OneDrive - University of South Florida\Classes\Fall 24\CAP 4103\Project\MobileBiometrics_Project2\08"  
+# Directory for face image files
+voice_data_dir = r"C:\Users\happy\OneDrive - University of South Florida\Classes\Fall 24\CAP 4103\Project\MobileBiometrics_Project2\Voices"  # Directory for voice .wav files
 
-width = 64
-dataset = fetch_olivetti_faces(shuffle=True)
-faces = dataset.data
-n_samples, n_features = faces.shape
-print("Dataset consists of %d faces" % n_samples)
+# ---------------------------
+# Load Face Images
+# ---------------------------
+image_files = [f for f in os.listdir(image_data_dir) if f.endswith('.png') or f.endswith('.jpg')][:5]
+image_list = []
 
+# Load and preprocess images
+for file in image_files:
+    img_path = os.path.join(image_data_dir, file)
+    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+    img = cv2.resize(img, (64, 64))  # Resize to a consistent size (64x64)
+    img_flattened = img.flatten()  # Flatten the image into a 1D array
+    image_list.append(img_flattened)
 
-plt.figure()
-plt.title("Example of an Original Image")
-plt.imshow(faces[0].reshape((width,width)), cmap='gray')
+# Convert image list to numpy array
+faces = np.array(image_list)
 
+# ---------------------------
+# Load Voice Files and Convert to Spectrograms
+# ---------------------------
+voice_files = [f for f in os.listdir(voice_data_dir) if f.endswith('.wav')][:5]
+voice_list = []
 
-# Squash it
-faces = faces.transpose() # each column is a squashed face
+# Load and preprocess .wav files (convert to spectrograms)
+for file in voice_files:
+    audio_path = os.path.join(voice_data_dir, file)
+    y, sr = librosa.load(audio_path)  # Load the audio file
+    spectrogram = librosa.feature.melspectrogram(y=y, sr=sr)
+    spectrogram_db = librosa.power_to_db(spectrogram, ref=np.max)  # Convert to decibel scale
+    spectrogram_resized = cv2.resize(spectrogram_db, (64, 64))  # Resize the spectrogram to match image size
+    spectrogram_flattened = spectrogram_resized.flatten()  # Flatten into a 1D array
+    voice_list.append(spectrogram_flattened)
 
-# Get the mean face
-mean_face = faces.mean(axis=1)
-plt.figure()
-plt.title("Average Face")
-plt.imshow(mean_face.reshape((width,width)), cmap='gray')
+# Convert voice list to numpy array
+voices = np.array(voice_list)
 
+# ---------------------------
+# Combine Faces and Voices
+# ---------------------------
+# To combine faces and voices, ensure both have the same number of features (flattened array length)
+data = np.vstack((faces, voices))  # Stack the face and voice data
 
-# Subtract the mean face
-for col in range(faces.shape[1]):
-    faces[:,col] = faces[:,col] - mean_face
-    
-plt.figure()
-plt.title("Original Image with Average Face Removed")
-plt.imshow(faces[:,0].reshape((width,width)), cmap='gray')
+# ---------------------------
+# Apply PCA
+# ---------------------------
+n_samples, n_features = data.shape
+print(f"Dataset consists of {n_samples} samples, each with {n_features} features.")
 
+n_components = min(n_samples, 10)  # Number of components for PCA
+pca = PCA(n_components=n_components, svd_solver='randomized', whiten=True).fit(data)
+data_pca = pca.transform(data)
 
-# Compute the covariance matrix, C
-C = np.cov(faces.transpose())
-
-
-# Get the eigenfaces from C
-evals, evecs = np.linalg.eig(C)
-
-# Show some eigenfaces
-eigenfaces = np.dot(faces, evecs)
-plt.figure()
-plt.subplot(131)
-plt.title("Top three eigenfaces")
-plt.imshow(eigenfaces[:,0].reshape(width, width), cmap='gray')
-plt.subplot(132)
-plt.imshow(eigenfaces[:,1].reshape(width, width), cmap='gray')
-plt.subplot(133)
-plt.imshow(eigenfaces[:,2].reshape(width, width), cmap='gray')
-
-
-# Can we really reconstruct the face?
-k = 20
-face1 = np.zeros(width**2)
-for i in range(k):
-    face1 += eigenfaces[:,i].transpose() * faces[:,0] * eigenfaces[:,i]  
-    
-    # plt.figure()
-    # plt.title("Reconstructed Face --- Using %d Eigenfaces" % i)
-    # plt.imshow(face1.reshape(width, width), cmap='gray')
-    
-plt.figure()
-plt.title("Reconstructed Face using Top 20 Eigenfaces")
-plt.imshow(face1.reshape(width, width), cmap='gray')
-
-
-# Finally, what do the features look like?
-face_features = np.zeros((faces.shape[1], k))
-for i in range(faces.shape[1]):
-    face = faces[:,i]
-    for j in range(k):
-        face_features[i,j] = np.dot(eigenfaces[:,j].transpose(), face)
+# PCA transformation completed for both images and voice data
+print(f"PCA transformation completed, reduced to {n_components} components.")

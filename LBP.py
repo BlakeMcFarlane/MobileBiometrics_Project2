@@ -1,186 +1,77 @@
-import cv2
-import numpy as np
+import os
+import cv2  # For image processing
+import librosa  # For audio processing
+import librosa.display
 import matplotlib.pyplot as plt
+import numpy as np
+from skimage.feature import local_binary_pattern  # Use scikit-image for LBP
 
-def get_lbp(image, width):
-    """
-    Compute the Local Binary Pattern (LBP) of an input grayscale image.
+# Directories for local datasets
+image_data_dir = r"C:\Users\happy\OneDrive - University of South Florida\Classes\Fall 24\CAP 4103\Project\MobileBiometrics_Project2\08"  
+# Directory for face image files
+voice_data_dir = r"C:\Users\happy\OneDrive - University of South Florida\Classes\Fall 24\CAP 4103\Project\MobileBiometrics_Project2\Voices"  # Directory for voice .wav files
 
-    Parameters:
-        image (numpy.ndarray): The input grayscale image.
-        width (int): Width of the square image.
+# ---------------------------
+# Load Face Images and Apply LBP
+# ---------------------------
+image_files = [f for f in os.listdir(image_data_dir) if f.endswith('.png') or f.endswith('.jpg')][:5]
 
-    Returns:
-        numpy.ndarray: The LBP image.
-
-    """
+# Process each image for LBP
+for file in image_files:
+    img_path = os.path.join(image_data_dir, file)
     
-    # Initialize an array to store the LBP image
-    lbp_image = np.zeros(shape=(width, width))
+    # Load image in grayscale
+    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+    img = cv2.resize(img, (100, 100))  # Resize image (100x100)
     
-    # Define the number of neighboring pixels to consider
-    num_neighbors = 1
+    # Display image for verification
+    plt.figure()
+    plt.imshow(img, cmap='gray')
+    plt.title(f"Original Image: {file}")
+    plt.show()
     
-    # Iterate over each pixel in the image
-    for i in range(num_neighbors, image.shape[0] - num_neighbors):
-        for j in range(num_neighbors, image.shape[1] - num_neighbors):
-            
-            # Get the pixel at [i,j] as the center pixel
-            center_pixel = image[i, j]
-            
-            # Initialize a binary string
-            binary_string = ""
-            
-            # Iterate over the neighboring pixels of the center pixel
-            
-            ''' 
-            Local Binary Patterns (LBP) is a texture descriptor that 
-            encodes the local structure of an image by comparing each 
-            pixel with its surrounding neighbors and representing the 
-            result as a binary pattern. Comparing each pixel with its 
-            surrounding neighbors in local binary patterns (LBP) involves 
-            examining the intensity values of neighboring pixels relative 
-            to the central pixel. By thresholding these intensity 
-            differences, binary patterns are generated, encoding local 
-            variations in texture and structure. This process captures 
-            information about the local texture patterns within the image, 
-            allowing for robust analysis and classification of textures 
-            and objects. The significance of the binary patterns lies 
-            in their ability to represent local texture variations 
-            efficiently and effectively. By encoding the relationships 
-            between a central pixel and its neighboring pixels as binary 
-            values (0 or 1), complex texture information is simplified 
-            into a compact form. This binary representation is robust 
-            to changes in illumination and noise, making it highly 
-            suitable for tasks such as texture classification, facial 
-            recognition, and object detection in computer vision 
-            applications. Additionally, the binary nature of LBP 
-            enables simple and fast computation, facilitating 
-            real-time processing in various systems and scenarios.
-            '''
-            
-            for m in range(i - num_neighbors, i + num_neighbors + 1):
-                for n in range(j - num_neighbors, j + num_neighbors + 1):
-                    
-                    # Skip the center pixel
-                    if [i, j] == [m, n]:
-                        pass
-                    
-                    else:
-                        neighbor_pixel = image[m, n]                                           
-                        # Compare the intensity of the center pixel with its neighbors
-                        if center_pixel >= neighbor_pixel:
-                            binary_string += '0'
-                        else:
-                            binary_string += '1'
-            
-            # Convert the binary string to decimal and assign it to the corresponding pixel in the LBP image
-            lbp_image[i, j] = int(binary_string, 2)
-            
-    return lbp_image
-
-
-def get_features(image, size):
-    """
-    Compute and concatenate histograms of image blocks.
-
-    Parameters:
-        image (numpy.ndarray): The input image.
-        size (int): Size of the blocks for histogram computation.
-
-    Returns:
-        list: Concatenated histograms of the image blocks.
-
-    """
-    # Initialize a list to store histograms
-    histograms = []
+    # Compute LBP feature extraction using skimage's local_binary_pattern
+    radius = 1  # radius of neighborhood
+    n_points = 8 * radius  # number of points to consider
+    lbp = local_binary_pattern(img, n_points, radius, method='uniform')  # Apply LBP
     
-    # Iterate over image blocks
-    for i in range(0, image.shape[0], size):
-        for j in range(0, image.shape[1], size):
-            # Extract a block from the image
-            block = image[i:i+size, j:j+size]
-            
-            # Compute histogram of the block and append it to the list of histograms
-            
-        
-            if i == 40:
-                image_box = np.zeros(shape=(100, 100))
-                image_box[i:i+size, j:j+size] = image[i:i+size, j:j+size]
-                plt.figure()
-                plt.imshow(image_box, cmap="gray")
-                
-                plt.figure()
-                plt.imshow(block, cmap="gray")
-                
-                plt.figure()
-                plt.hist(block)
-                plt.show()
-            
-               
-            histograms.extend(np.histogram(block, bins=[0, 51, 102, 153, 204, 255])[0])
+    # Display the LBP image
+    plt.figure()
+    plt.imshow(lbp, cmap='gray')
+    plt.title(f"LBP of {file}")
+    plt.show()
+
+# ---------------------------
+# Load Voice Files and Convert to Spectrograms, Apply LBP
+# ---------------------------
+voice_files = [f for f in os.listdir(voice_data_dir) if f.endswith('.wav')][:5]
+
+# Process each voice file into spectrogram and apply LBP
+for file in voice_files:
+    audio_path = os.path.join(voice_data_dir, file)
     
-    return histograms
-
-
-
-######################################################################
-######################################################################
-######################################################################
-
-# Load the image from the specified directory
-img_file = "sample-3.png"
-
-#img_file = "lbp.drawio.png"
-img = cv2.imread(img_file)
-
-# Resize the image to a fixed size (100x100 pixels)
-img = cv2.resize(img, (100, 100))
-plt.figure()
-plt.imshow(img, cmap="gray")
-
-# Convert the image to grayscale
-img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-# Compute Local Binary Pattern (LBP) features of the grayscale image
-lbp_img = get_lbp(img_gray, 100)
-
-# Display the LBP image
-plt.figure()
-plt.imshow(lbp_img, cmap="gray")
-
-# Extract features from the LBP image
-features = get_features(lbp_img, 20)
-plt.figure()
-plt.plot(features)
-
-
-'''
-# define the alpha and beta
-alpha = .5 # Contrast control
-beta = 70 # Brightness control
-
-# call convertScaleAbs function
-adjusted = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
-plt.figure()
-plt.imshow(adjusted, cmap="gray")
-
-# Convert the image to grayscale
-img_gray = cv2.cvtColor(adjusted, cv2.COLOR_BGR2GRAY)
-
-# Compute Local Binary Pattern (LBP) features of the grayscale image
-lbp_img = get_lbp(img_gray, 100)
-
-# Display the LBP image
-plt.figure()
-plt.imshow(lbp_img, cmap="gray")
-
-# Extract features from the LBP image
-features = get_features(lbp_img, 20)
-plt.figure()
-plt.plot(features)
-'''
-
-
-
-
+    # Load the audio file
+    y, sr = librosa.load(audio_path)
+    
+    # Generate mel-spectrogram
+    spectrogram = librosa.feature.melspectrogram(y=y, sr=sr)
+    spectrogram_db = librosa.power_to_db(spectrogram, ref=np.max)  # Convert to decibel scale
+    
+    # Resize spectrogram to match image size
+    spectrogram_resized = cv2.resize(spectrogram_db, (100, 100))
+    
+    # Display spectrogram for verification
+    plt.figure()
+    librosa.display.specshow(spectrogram_resized, sr=sr, x_axis='time', y_axis='mel')
+    plt.title(f"Spectrogram of {file}")
+    plt.colorbar(format='%+2.0f dB')
+    plt.show()
+    
+    # Apply LBP on the spectrogram (use the same LBP method as above)
+    lbp_spectrogram = local_binary_pattern(spectrogram_resized, n_points, radius, method='uniform')
+    
+    # Display the LBP spectrogram
+    plt.figure()
+    plt.imshow(lbp_spectrogram, cmap='gray')
+    plt.title(f"LBP of Spectrogram for {file}")
+    plt.show()
