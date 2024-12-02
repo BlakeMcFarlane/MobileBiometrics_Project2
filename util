@@ -1,0 +1,154 @@
+import dlib
+import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+import math
+import os
+
+def distances(points):
+    dist = []
+    for i in range(points.shape[0]):
+        for j in range(points.shape[0]):
+            p1 = points[i,:]
+            p2 = points[j,:]      
+            dist.append( math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2) )
+    return dist
+
+def angle_between_vectors(v1, v2):
+    # Returns the angle in degrees between vectors 'v1' and 'v2'
+    angle = np.arccos(
+        np.clip(
+            np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)),
+            -1.0,
+            1.0
+        )
+    )
+    return np.degrees(angle)
+
+def polygon_area(points):
+    # Compute the area of a polygon given its vertices
+    x = points[:, 0]
+    y = points[:, 1]
+    return 0.5 * np.abs(np.dot(x, np.roll(y, 1)) - np.dot(y, np.roll(x, 1)))
+
+def compute_facial_feature_features(points, feature_name):
+    # points: N x 2 array of coordinates for the facial feature
+    features = []
+    
+    # Compute distances between consecutive points
+    distances = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    
+    # Determine if the shape is closed
+    closed_shapes = ["Right_Eye", "Left_Eye", "Outer_Lip", "Inner_Lip"]
+    if feature_name in closed_shapes:
+        # Close the loop
+        d = np.linalg.norm(points[0] - points[-1])
+        distances = np.append(distances, d)
+        closed_points = np.vstack([points, points[0]])
+    else:
+        closed_points = points
+
+    # Compute statistics of distances
+    features.append(distances.mean())   # Mean distance
+    features.append(distances.std())    # Std of distances
+    features.append(distances.sum())    # Perimeter
+
+    # Compute angles between consecutive segments
+    angles = []
+    for i in range(1, len(points) - 1):
+        v1 = points[i] - points[i - 1]
+        v2 = points[i + 1] - points[i]
+        angle = angle_between_vectors(v1, v2)
+        angles.append(angle)
+    angles = np.array(angles)
+    if len(angles) > 0:
+        features.append(angles.mean())  # Mean angle
+        features.append(angles.std())   # Std of angles
+    else:
+        features.extend([0, 0])         # If not enough points, append zeros
+
+    # Compute area enclosed (if applicable)
+    if feature_name in closed_shapes and len(points) >= 3:
+        area = polygon_area(closed_points)
+        features.append(area)
+    else:
+        features.append(0)  # Area not applicable
+
+    return features
+
+def get_bounding_box(rect):
+    x = rect.left()
+    y = rect.top()
+    w = rect.right() - x
+    h = rect.bottom() - y
+    return x, y, w, h
+
+def shape_to_np(shape, num_coords, dtype="int"):
+    coords = np.zeros((num_coords, 2), dtype=dtype)
+    for i in range(0, num_coords):
+        coords[i] = (shape.part(i).x, shape.part(i).y)
+    return coords
+
+def get_landmarks(images, labels, save_directory="", num_coords=68, to_save=False):
+    print("Getting %d facial landmarks" % num_coords)
+    landmarks = []
+    new_labels = []
+    img_ct = 0
+
+    if num_coords == 5:
+        predictor_path = './shape_predictor_5_face_landmarks.dat'
+    else:
+        predictor_path = './shape_predictor_68_face_landmarks.dat'
+
+    # Define facial features indices
+    facial_features = [
+        ("Jaw", list(range(0, 17))),
+        ("Right_Eyebrow", list(range(17, 22))),
+        ("Left_Eyebrow", list(range(22, 27))),
+        ("Nose", list(range(27, 36))),
+        ("Right_Eye", list(range(36, 42))),
+        ("Left_Eye", list(range(42, 48))),
+        ("Outer_Lip", list(range(48, 60))),
+        ("Inner_Lip", list(range(60, 68)))
+    ]
+
+    detector = dlib.get_frontal_face_detector()
+    predictor = dlib.shape_predictor(predictor_path)
+
+    for img, label in zip(images, labels):
+        img_ct += 1
+        detected_faces = detector(img, 1)
+        for d in detected_faces:
+            new_labels.append(label)
+            x, y, w, h = get_bounding_box(d)
+            points = shape_to_np(predictor(img, d), num_coords)
+
+            if num_coords == 68:
+                features = []
+                for feature_name, indices in facial_features:
+                    feature_points = points[indices, :]
+                    feature_vector = compute_facial_feature_features(feature_points, feature_name)
+                    features.extend(feature_vector)
+                landmarks.append(features)
+            else:
+                # For 5-point model, use distances as before
+                dist = distances(points)
+                landmarks.append(dist)
+
+            if to_save:
+                for (x_, y_) in points:
+                    cv2.circle(img, (x_, y_), 1, (0, 255, 0), -1)
+                plt.figure()
+                plt.imshow(img)
+                if not os.path.isdir(save_directory):
+                    os.mkdir(save_directory)
+                plt.savefig(save_directory + label + '%d.png' % img_ct)
+                plt.close()
+
+            if img_ct % 50 == 0:
+                print("%d images with facial landmarks completed." % img_ct)
+
+    print("Landmarks shape:", np.array(landmarks).shape)
+    print("Labels:", len(new_labels))
+
+    return np.array(landmarks), np.array(new_labels)

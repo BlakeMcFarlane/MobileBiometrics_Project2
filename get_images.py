@@ -33,8 +33,8 @@ def get_images(image_directory):
                             os.path.join(image_directory, subfolder, file)
                             )
                     # resize the image                     
-                    width = 100
-                    height = 100
+                    width = 500
+                    height = 500
                     dim = (width, height)
                     img = cv2.resize(img, dim)
                     # add the resized image to a list X

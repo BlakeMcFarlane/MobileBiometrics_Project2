@@ -24,11 +24,11 @@ image_directory = './Caltech Faces Dataset'
 X, y = get_images.get_images(image_directory)
 
 ''' Get distances between face landmarks in the images '''
-X, y = get_landmarks.get_landmarks(X, y, 'landmarks/', 68, True)
+features, y = get_landmarks.get_landmarks(X, y, 'landmarks/', 68, True)
 
 ''' Matching and Decision '''
 clf = ORC(knn())
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(features, y, test_size=0.33, random_state=42)
 clf.fit(X_train, y_train)
 
 matching_scores = clf.predict_proba(X_test)
