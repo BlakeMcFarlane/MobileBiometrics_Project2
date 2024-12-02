@@ -14,15 +14,6 @@ def distances1(points):
             dist.append( math.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2) )
     return dist
 
-def distances2(points):
-    dist = []
-    for i in range(points.shape[0]):
-        for j in range(points.shape[0]):
-            p1 = points[i,:]
-            p2 = points[j,:]      
-            dist.append( abs(p1[0] - p2[0]) + abs(p1[1] - p2[1]) )
-    return dist
-
 def get_bounding_box(rect):
 	# take a bounding predicted by dlib and convert it
 	# to the format (x, y, w, h) 
@@ -72,11 +63,9 @@ def get_landmarks(images, labels, save_directory="", num_coords=5, to_save=False
                     num_coords) 
                         
             dist_1 = distances1(points)    
-            dist_2 = distances2(points)  
 
-            dist = dist_1 + dist_2              
+            dist = dist_1           
             print(len(dist_1))
-            print(len(dist_2))
             print(len(dist))
                
             landmarks.append(dist)    
