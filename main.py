@@ -1,165 +1,255 @@
-import os
 import numpy as np
-import librosa
 import matplotlib.pyplot as plt
-from sklearn import svm, metrics
-from sklearn.model_selection import train_test_split
-from sklearn.datasets import fetch_olivetti_faces
-import scipy.stats as stats
+from sklearn import metrics
+from sklearn import svm
+import librosa  # Library for audio feature extraction
+import os
 
+print("hi")
 
-# Load the Olivetti face dataset (facial data)
-faces = fetch_olivetti_faces()
-X_faces = faces.data  # Flattened facial images (400 samples, 64x64 images)
-y_faces = faces.target  # Corresponding labels (40 classes of people)
-
-# Load voice data from .wav files
-voice_dir = r"Voice Data"
-wav_files = sorted([f for f in os.listdir(voice_dir) if f.endswith('.wav')])
-
-# Define a function to extract MFCC features from a voice file
-def extract_mfcc_features(wav_file, sr=16000, n_mfcc=13):
-    y, sr = librosa.load(wav_file, sr=sr)
-    mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=n_mfcc)
-    return np.mean(mfcc.T, axis=0)  # Average across time to get a single feature vector
-
-# Extract MFCC features for each voice file
-X_voice = []
-for wav_file in wav_files:
-    mfcc = extract_mfcc_features(os.path.join(voice_dir, wav_file))
-    X_voice.append(mfcc)
-X_voice = np.array(X_voice)
-
-# Assuming the same number of voice files as face images and labels
-assert len(X_voice) == len(X_faces) == len(y_faces), "Number of samples must match between face and voice datasets"
-
-# Combine face and voice features for multimodal input
-X_combined = np.hstack((X_faces, X_voice))  # Concatenate face and voice features
-
-# Split data into training and test sets (80% train, 20% test)
-X_train_face, X_test_face, y_train, y_test = train_test_split(X_faces, y_faces, test_size=0.2, random_state=42)
-X_train_comb, X_test_comb, _, _ = train_test_split(X_combined, y_faces, test_size=0.2, random_state=42)
-
-# Train classifiers using face-only and multimodal (face+voice) data
-clf_face = svm.SVC(kernel='rbf', class_weight='balanced', probability=True)
-clf_comb = svm.SVC(kernel='rbf', class_weight='balanced', probability=True)
-
-clf_face.fit(X_train_face, y_train)
-clf_comb.fit(X_train_comb, y_train)
-
-# Evaluate performance
-y_pred_face = clf_face.predict(X_test_face)
-y_pred_comb = clf_comb.predict(X_test_comb)
-
-# Confusion matrix calculation
-def calculate_confusion_matrix_metrics(y_true, y_pred, label_name):
-    # Calculate the confusion matrix
-    cm = metrics.confusion_matrix(y_true, y_pred)
+# Function to extract voice features for multiple files per identity
+def extract_voice_features(identity, voice_folder):
+    features_list = []
+    max_files_per_identity = {
+        0: 49, 1: 49, 2: 49, 3: 49, 4: 49, 5: 49, 6: 49,
+        7: 40, 8: 34
+    }
     
-    # Calculate metrics for each class and average them (macro average)
-    report = metrics.classification_report(y_true, y_pred, output_dict=True)
+    # Determine the number of voice files for the current identity
+    num_files = max_files_per_identity.get(identity, 0)  # Default to 0 if identity is not in the dict
     
-    print(f"\nMetrics for {label_name}:")
-    print(f"Accuracy: {report['accuracy']:.4f}")
-    print(f"Precision: {report['macro avg']['precision']:.4f}")
+    for i in range(num_files):  # Iterate over each file from 0 to num_files
+        voice_file = os.path.join(voice_folder, f"{identity}_09_{i}.wav")
+        
+        if os.path.exists(voice_file):
+            try:
+                voice_data, sr = librosa.load(voice_file, sr=None)
+                mfcc_features = librosa.feature.mfcc(voice_data, sr=sr, n_mfcc=13)
+                mean_mfcc = np.mean(mfcc_features.T, axis=0)  # Average MFCC features
+                features_list.append(mean_mfcc)  # Add MFCC features to the list
+            except Exception as e:
+                print(f"Error loading {voice_file}: {str(e)}. Skipping this file.")
+        else:
+            print(f"Warning: Voice file {voice_file} not found.")
+    
+    if features_list:
+        # Average the features across all the voice files for this identity
+        aggregated_features = np.mean(features_list, axis=0)
+        print(f"Successfully extracted and averaged voice features for identity {identity}")
+        return aggregated_features
+    else:
+        # If no files are found, use zeros as placeholder
+        print(f"Warning: No valid voice files found for identity {identity}. Using zeros as placeholder.")
+        return np.zeros(13)
 
-# Example usage:
-calculate_confusion_matrix_metrics(y_test, y_pred_face, "Face Only")
-calculate_confusion_matrix_metrics(y_test, y_pred_comb, "Face + Voice")
+class Evaluator:
+    def __init__(self, num_thresholds, genuine_scores, impostor_scores, plot_title, epsilon=1e-12):
+        self.num_thresholds = num_thresholds
+        self.thresholds = np.linspace(-0.1, 1.1, num_thresholds)
+        self.genuine_scores = genuine_scores
+        self.impostor_scores = impostor_scores
+        self.plot_title = plot_title
+        self.epsilon = epsilon
 
-# Get prediction probabilities for ROC curves
-y_prob_face = clf_face.predict_proba(X_test_face)
-y_prob_comb = clf_comb.predict_proba(X_test_comb)
+    def get_dprime(self):
+        mean_genuine = np.mean(self.genuine_scores)
+        mean_impostor = np.mean(self.impostor_scores)
+        std_genuine = np.std(self.genuine_scores)
+        std_impostor = np.std(self.impostor_scores)
+        x = mean_genuine - mean_impostor
+        y = np.sqrt((std_genuine ** 2 + std_impostor ** 2) / 2)
+        return x / (y + self.epsilon)
 
-# Calculate EER and ROC curves
-def calculate_eer(y_true, y_prob):
-    fpr, tpr, thresholds = metrics.roc_curve(y_true, y_prob, pos_label=1)
-    fnr = 1 - tpr
-    eer_threshold = 0.5  # Set the threshold to 0.5
-    eer = fpr[np.nanargmin(np.absolute(fnr - fpr))]  # Equal error rate (FPR at EER)
-    return eer, eer_threshold
+    def get_EER(self, FPR, FNR):
+        differences = np.abs(np.array(FPR) - np.array(FNR))
+        min_index = np.argmin(differences)
+        return (FPR[min_index] + FNR[min_index]) / 2
 
+    def calculate_metrics(self, FPR, TPR):
+        # True Negative Rate (TNR) = 1 - FPR
+        TNR = 1 - FPR
+        
+        # False Negative Rate (FNR) = 1 - TPR
+        FNR = 1 - TPR
 
-# Assuming binary classification (classifying one person's identity as genuine)
-# Modify as needed depending on how your target labels are structured
-y_test_binary = (y_test == 1).astype(int)  # Modify for binary EER
-eer_face, eer_threshold_face = calculate_eer(y_test_binary, y_prob_face[:, 1])
-eer_comb, eer_threshold_comb = calculate_eer(y_test_binary, y_prob_comb[:, 1])
+        # Accuracy calculation: (TP + TN) / (Total)
+        accuracy = (TPR + TNR) / 2
 
-# Print EER values
-print(f"EER for Face Only: {eer_face:.4f} (Threshold: {eer_threshold_face:.4f})")
-print(f"EER for Face + Voice: {eer_comb:.4f} (Threshold: {eer_threshold_comb:.4f})")
+        # Equal Error Rate (EER)
+        EER = self.get_EER(FPR, FNR)
 
-# Plot ROC curves
-fpr_face, tpr_face, _ = metrics.roc_curve(y_test_binary, y_prob_face[:, 1])
-fpr_comb, tpr_comb, _ = metrics.roc_curve(y_test_binary, y_prob_comb[:, 1])
+        return accuracy, FPR, FNR, TPR, TNR, EER
 
-plt.figure()
-plt.plot(fpr_face, tpr_face, label=f'Face Only (EER={eer_face:.2f})')
-plt.plot(fpr_comb, tpr_comb, label=f'Face + Voice (EER={eer_comb:.2f})')
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('ROC Curve Comparison')
-plt.legend(loc='best')
-plt.grid(True)
-plt.show()
+    def print_metrics(self, accuracy, FPR, FNR, TPR, TNR, EER):
+        print(f"d-prime: {self.get_dprime():.4f}")
+        print(f"Accuracy: {accuracy.mean():.4f}")
+        print(f"False Positive Rate (FPR): {FPR.mean():.4f}")
+        print(f"False Negative Rate (FNR): {FNR.mean():.4f}")
+        print(f"True Positive Rate (TPR): {TPR.mean():.4f}")
+        print(f"True Negative Rate (TNR): {TNR.mean():.4f}")
+        print(f"Equal Error Rate (EER): {EER:.4f}")
 
-# Genuine vs Impostor score distribution
-def plot_score_distribution(genuine_scores, impostor_scores, title):
-    plt.hist(genuine_scores, bins=50, color='green', lw=2, histtype='step', label='Genuine')
-    plt.hist(impostor_scores, bins=50, color='red', lw=2, histtype='step', label='Impostor')
-    plt.title(title)
-    plt.xlabel('Score')
-    plt.ylabel('Frequency')
-    plt.legend(loc='upper right')
-    plt.show()
+    def plot_score_distribution(self):
+        plt.figure()
+        plt.hist(self.genuine_scores, bins=50, color='green', lw=2, histtype='step', label='Genuine', hatch='//')
+        plt.hist(self.impostor_scores, bins=50, color='red', lw=2, histtype='step', label='Impostor', hatch='\\')
+        plt.xlim([-0.05, 1.05])
+        plt.grid(color='gray', linestyle='--', linewidth=0.5)
+        plt.legend(loc='upper left', fontsize=10)
+        plt.xlabel('Scores', fontsize=12, weight='bold')
+        plt.ylabel('Frequency', fontsize=12, weight='bold')
+        plt.gca().spines['top'].set_visible(False)
+        plt.gca().spines['right'].set_visible(False)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.title(f'Score Distribution Plot\nd-prime= {self.get_dprime():.2f}\nSystem {self.plot_title}', fontsize=15, weight='bold')
+        plt.savefig(f'score_distribution_plot_({self.plot_title}).png', dpi=300, bbox_inches="tight")
+        plt.show()
+        plt.close()
 
-# Function to calculate d-prime
-def calculate_d_prime(genuine_scores, impostor_scores):
-    # Calculate hit rate and false alarm rate
-    hit_rate = np.mean(genuine_scores > 0.5)  # Threshold set to 0.5
-    false_alarm_rate = np.mean(impostor_scores > 0.5)  # Threshold set to 0.5
+    def plot_det_curve(self, FPR, FNR):
+        EER = self.get_EER(FPR, FNR)
+        plt.figure()
+        plt.plot(FPR, FNR, lw=2, color='blue', label='DET Curve')
+        plt.text(EER + 0.07, EER + 0.07, "EER", style='italic', fontsize=12,
+                 bbox={'facecolor': 'grey', 'alpha': 0.5, 'pad': 10})
+        plt.plot([0, 1], [0, 1], '--', lw=0.5, color='black')
+        plt.scatter([EER], [EER], c="black", s=100, label='EER')
+        plt.xlim([-0.05, 1.05])
+        plt.ylim([-0.05, 1.05])
+        plt.grid(color='gray', linestyle='--', linewidth=0.5)
+        plt.xlabel('FPR', fontsize=12, weight='bold')
+        plt.ylabel('FNR', fontsize=12, weight='bold')
+        plt.legend(loc='upper left', fontsize=10)
+        plt.title(f'DET Curve\nEER= {EER:.5f}\nSystem {self.plot_title}', fontsize=15, weight='bold')
+        plt.savefig(f'DET_curve_({self.plot_title}).png', dpi=300, bbox_inches="tight")
+        plt.show()
+        plt.close()
 
-    # Apply epsilon to avoid extreme values that would cause NaN in Z calculation
-    epsilon = 1e-5  # Small value to bound rates between 0 and 1
-    hit_rate = np.clip(hit_rate, epsilon, 1 - epsilon)
-    false_alarm_rate = np.clip(false_alarm_rate, epsilon, 1 - epsilon)
+    def plot_roc_curve(self, FPR, TPR):
+        plt.figure()
+        plt.plot(FPR, TPR, lw=2, color='orange', label='ROC Curve')
+        plt.plot([0, 1], [0, 1], '--', lw=0.5, color='black')
+        plt.xlim([-0.05, 1.05])
+        plt.ylim([-0.05, 1.05])
+        plt.grid(color='gray', linestyle='--', linewidth=0.5)
+        plt.xlabel('FPR', fontsize=12, weight='bold')
+        plt.ylabel('TPR', fontsize=12, weight='bold')
+        plt.legend(loc='lower right', fontsize=10)
+        plt.title(f'ROC Curve\nSystem {self.plot_title}', fontsize=15, weight='bold')
+        plt.savefig(f'ROC_curve_({self.plot_title}).png', dpi=300, bbox_inches="tight")
+        plt.show()
+        plt.close()
 
-    # Apply z-score transformation
-    z_hit_rate = stats.norm.ppf(hit_rate)
-    z_false_alarm_rate = stats.norm.ppf(false_alarm_rate)
+# Function to combine face and voice features
+def combine_features(face_features, voice_features):
+    # Concatenate face and voice features
+    combined_features = np.concatenate([face_features, voice_features])
+    return combined_features
 
-    # Calculate d-prime
-    d_prime = z_hit_rate - z_false_alarm_rate
-    return d_prime
+# Load face data (from Code 1)
+X = np.load("X-68-Caltech.npy")
+y = np.load("y-68-Caltech.npy")
+num_identities = y.shape[0]
 
+# Extract face features (as done in original code)
+face_features = []
+for k in range(num_identities):
+    person_k = X[k]
+    features_k = []
+    for i in range(person_k.shape[0]):
+        for j in range(person_k.shape[0]):
+            p1 = person_k[i, :]
+            p2 = person_k[j, :]
+            features_k.append(np.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2))
+    face_features.append(features_k)
+face_features = np.array(face_features)
 
+# Load voice features for all identities
+voice_folder = "Voice Data"
+voice_features = []
 
-# Genuine vs Impostor scores for Face Only
-genuine_scores_face = y_prob_face[y_test_binary == 1, 1]
-impostor_scores_face = y_prob_face[y_test_binary == 0, 1]
+for i in range(len(y)):
+    identity = y[i]
+    features = extract_voice_features(identity, voice_folder)
+    voice_features.append(features)
 
-# Genuine vs Impostor scores for Face + Voice
-genuine_scores_comb = y_prob_comb[y_test_binary == 1, 1]
-impostor_scores_comb = y_prob_comb[y_test_binary == 0, 1]
+voice_features = np.array(voice_features)
 
-# Calculate d-prime for both models
-d_prime_face = calculate_d_prime(genuine_scores_face, impostor_scores_face)
-d_prime_comb = calculate_d_prime(genuine_scores_comb, impostor_scores_comb)
+# Combine face and voice features for multimodal system
+multimodal_features = np.array([combine_features(face_features[i], voice_features[i]) for i in range(num_identities)])
 
-# Print d-prime values
-print(f"D-prime for Face Only: {d_prime_face:.4f}")
-print(f"D-prime for Face + Voice: {d_prime_comb:.4f}")
+# Define classifier (SVM in this case)
+clf = svm.SVC(kernel='rbf', class_weight='balanced', probability=True)
 
-# Print the number of genuine and imposter scores for Face Only and Face + Voice
-num_genuine_face = len(genuine_scores_face)
-num_imposter_face = len(impostor_scores_face)
-num_genuine_comb = len(genuine_scores_comb)
-num_imposter_comb = len(impostor_scores_comb)
+# Initialize lists to store genuine and impostor scores for both systems
+genuine_scores_face_only = []
+impostor_scores_face_only = []
+genuine_scores_multimodal = []
+impostor_scores_multimodal = []
 
-print(f"Face Only: Genuine = {num_genuine_face}, Imposter = {num_imposter_face}")
-print(f"Face + Voice: Genuine = {num_genuine_comb}, Imposter = {num_imposter_comb}")
+# Evaluate the system
+for i in range(len(y)):
+    # Face-only system
+    query_face_X = face_features[i, :]
+    query_y = y[i]
+    template_face_X = np.delete(face_features, i, 0)
+    template_y = np.delete(y, i)
+    
+    clf.fit(template_face_X, template_y)
+    
+    # Predict probabilities for face-only system
+    y_prob_face = clf.predict_proba(query_face_X.reshape(1, -1))[0]
+    genuine_scores_face_only.append(y_prob_face[1])
+    impostor_scores_face_only.append(y_prob_face[0])
 
-# Plot the score distributions
-plot_score_distribution(genuine_scores_face, impostor_scores_face, 'Face Only Genuine vs Impostor')
-plot_score_distribution(genuine_scores_comb, impostor_scores_comb, 'Face + Voice Genuine vs Impostor')
+    # Multimodal system (Face + Voice)
+    query_multimodal_X = multimodal_features[i, :]
+    template_multimodal_X = np.delete(multimodal_features, i, 0)
+
+    clf.fit(template_multimodal_X, template_y)
+    
+    # Predict probabilities for multimodal system
+    y_prob_multimodal = clf.predict_proba(query_multimodal_X.reshape(1, -1))[0]
+    genuine_scores_multimodal.append(y_prob_multimodal[1])
+    impostor_scores_multimodal.append(y_prob_multimodal[0])
+
+# Convert scores to numpy arrays
+genuine_scores_face_only = np.array(genuine_scores_face_only)
+impostor_scores_face_only = np.array(impostor_scores_face_only)
+genuine_scores_multimodal = np.array(genuine_scores_multimodal)
+impostor_scores_multimodal = np.array(impostor_scores_multimodal)
+
+# Initialize evaluators for both systems
+evaluator_face_only = Evaluator(num_thresholds=200, genuine_scores=genuine_scores_face_only, impostor_scores=impostor_scores_face_only, plot_title='Face-Only System')
+evaluator_multimodal = Evaluator(num_thresholds=200, genuine_scores=genuine_scores_multimodal, impostor_scores=impostor_scores_multimodal, plot_title='Multimodal System (Face + Voice)')
+
+# Evaluate Face-Only System
+FPR_face, TPR_face, _ = metrics.roc_curve(np.concatenate([np.ones_like(genuine_scores_face_only), np.zeros_like(impostor_scores_face_only)]),
+                                          np.concatenate([genuine_scores_face_only, impostor_scores_face_only]))
+FNR_face = 1 - TPR_face
+accuracy_face, FPR_face, FNR_face, TPR_face, TNR_face, EER_face = evaluator_face_only.calculate_metrics(FPR_face, TPR_face)
+
+# Evaluate Multimodal System
+FPR_multimodal, TPR_multimodal, _ = metrics.roc_curve(np.concatenate([np.ones_like(genuine_scores_multimodal), np.zeros_like(impostor_scores_multimodal)]),
+                                                      np.concatenate([genuine_scores_multimodal, impostor_scores_multimodal]))
+FNR_multimodal = 1 - TPR_multimodal
+accuracy_multimodal, FPR_multimodal, FNR_multimodal, TPR_multimodal, TNR_multimodal, EER_multimodal = evaluator_multimodal.calculate_metrics(FPR_multimodal, TPR_multimodal)
+
+# Print metrics for both systems
+print("\nFace-Only System Metrics:")
+evaluator_face_only.print_metrics(accuracy_face, FPR_face, FNR_face, TPR_face, TNR_face, EER_face)
+
+print("\nMultimodal System (Face + Voice) Metrics:")
+evaluator_multimodal.print_metrics(accuracy_multimodal, FPR_multimodal, FNR_multimodal, TPR_multimodal, TNR_multimodal, EER_multimodal)
+
+# Plot score distributions and curves for both systems
+evaluator_face_only.plot_score_distribution()
+evaluator_face_only.plot_det_curve(FPR_face, FNR_face)
+evaluator_face_only.plot_roc_curve(FPR_face, TPR_face)
+
+evaluator_multimodal.plot_score_distribution()
+evaluator_multimodal.plot_det_curve(FPR_multimodal, FNR_multimodal)
+evaluator_multimodal.plot_roc_curve(FPR_multimodal, TPR_multimodal)
+
+print("bye")
