@@ -37,16 +37,27 @@ def get_det(gen_scores, imp_scores):
     plt.show()
 
 
-def plot_confusion_matrix(clf, X_test, y_test):
-    # Predict labels for the test set
-    y_pred = clf.predict(X_test)
+def plot_confusion_matrix(y_true, y_pred, classes):
+    """
+    Plot confusion matrix using true labels, predicted labels, and class names.
 
+    Parameters:
+    - y_true: array-like of shape (n_samples,)
+        True labels.
+    - y_pred: array-like of shape (n_samples,)
+        Predicted labels.
+    - classes: array-like of shape (n_classes,)
+        Class labels (names).
+
+    Returns:
+    - None
+    """
     # Compute confusion matrix
-    cm = sk_confusion_matrix(y_test, y_pred, labels=clf.classes_)
+    cm = sk_confusion_matrix(y_true, y_pred, labels=classes)
 
     # Display confusion matrix
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=clf.classes_)
-    fig, ax = plt.subplots(figsize=(10, 10))
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=classes)
+    fig, ax = plt.subplots(figsize=(8, 8))
     disp.plot(cmap=plt.cm.Blues, ax=ax, xticks_rotation='vertical')
     plt.title('Confusion Matrix', fontsize=14)
     plt.show()

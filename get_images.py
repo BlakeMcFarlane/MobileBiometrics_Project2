@@ -45,4 +45,3 @@ def get_images(image_directory):
     print("All images are loaded")     
     # return the images and their labels      
     return X, y
-

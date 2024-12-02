@@ -5,7 +5,7 @@ import cv2
 import math
 import os
 
-def distances(points):
+def distances1(points):
     dist = []
     for i in range(points.shape[0]):
         for j in range(points.shape[0]):
@@ -62,7 +62,12 @@ def get_landmarks(images, labels, save_directory="", num_coords=5, to_save=False
                     predictor(img, d), 
                     num_coords) 
                         
-            dist = distances(points)                   
+            dist_1 = distances1(points)    
+
+            dist = dist_1           
+            print(len(dist_1))
+            print(len(dist))
+               
             landmarks.append(dist)    
             
             if to_save:
@@ -81,11 +86,10 @@ def get_landmarks(images, labels, save_directory="", num_coords=5, to_save=False
                 
             if img_ct % 50 == 0:
                 print("%d images with facial landmarks completed." % img_ct)
-
-    print("Landmarks shape:", np.array(landmarks).shape)
-    print("Labels:", len(new_labels))
-      
+                
     return np.array(landmarks), np.array(new_labels)
             
+            
+        
             
         
