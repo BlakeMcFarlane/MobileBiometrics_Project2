@@ -120,3 +120,4 @@ plot_confusion_matrix(y_test, y_pred_fused, classes)
 
 # Optional: Plot performance using your existing function
 performance_plots.performance(gen_scores, imp_scores, 'Score-Level Fusion Performance', 100)
+
